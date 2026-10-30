@@ -19,6 +19,7 @@ CoolMeter estimates the electricity used by an **LG LA100ENT 1 HP inverter windo
 - Separate household sign-ins with owner-created, email-bound invitation links that expire after 48 hours.
 - One shared AC timer and session history, with owner-only invitation and access management.
 - Larger text, clearer contrast, phone layouts that fit the screen, and saved light/dark theme preferences.
+- A blue/slate dark theme and an AC illustration that follows the selected temperature, including the running session's target after reload.
 - Initial journal data included in the page, cached public assets, and connection recovery for read requests.
 - Responsive layout and a PWA manifest for supported Android browsers.
 

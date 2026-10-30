@@ -4,7 +4,7 @@
     <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="theme-color" content="#143e35"><meta name="referrer" content="no-referrer"><meta name="robots" content="noindex,nofollow">
     <title>Join your shared AC · CoolMeter</title>
-    <link rel="icon" href="/icon.svg"><script src="/theme.js?v=4"></script><link rel="stylesheet" href="/app.css?v=4">
+    <link rel="icon" href="/icon.svg"><script src="/theme.js?v=7"></script><link rel="stylesheet" href="/app.css?v=7">
 </head>
 <body class="auth-page"><section class="auth-card" aria-label="Join shared AC">
     <div class="auth-top"><a href="/" class="auth-brand"><img src="/icon.svg" alt="">CoolMeter.</a>

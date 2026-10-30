@@ -11,7 +11,7 @@ const toInput = (d = new Date()) => new Date(new Date(d).getTime()+8*3600000).to
 const fromInput = (v) => new Date(v+':00+08:00');
 const duration = (hours) => {const minutes=Math.round(hours*60);return `${Math.floor(minutes/60)}h ${minutes%60}m`;};
 let state, mode='live', editId=null, pending=null, selectedRecord=null, ecoContext='manual', clockOffset=0, deleteTarget=null;
-let toastTimeout, initialLoad=true, loadPromise=null, lastLoadedAt=0, household=null;
+let toastTimeout, initialLoad=true, loadPromise=null, lastLoadedAt=0, household=null, temperatureDraft=false;
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 
 async function api(path, method='GET', body) {
@@ -58,10 +58,20 @@ function changePage(page) {
     history.replaceState(null,'','#'+page); window.scrollTo({top:0,behavior:'instant'});
     if(page==='settings') loadHousehold().catch(error=>{if($('household-members'))$('household-members').textContent=error.message;});
 }
-function setTemperature(value) {
-    value=Math.min(30,Math.max(16,Number(value)));
+function setTemperature(value, markDraft=true) {
+    value=Math.min(30,Math.max(16,Math.round(Number(value)||26)));
+    if(markDraft) temperatureDraft=true;
     $('temperature').value=value; $('temp-output').innerHTML=value+'<span>°C</span>';
     $('temp-minus').disabled=value===16; $('temp-plus').disabled=value===30;
+    renderACPreview();
+}
+function renderACPreview() {
+    const followsRunning=mode==='live'&&!editId&&!temperatureDraft&&state?.active;
+    const value=Number(followsRunning?state.active.temperature:$('temperature').value);
+    if(followsRunning&&Number($('temperature').value)!==value) {setTemperature(value,false);return;}
+    $('ac-preview-temperature').textContent=value;
+    $('ac-preview-caption').textContent=`${followsRunning?'Running session target':'Selected target'} ${value}°C`;
+    $('ac-preview-scene').dataset.running=String(!!state?.active);
 }
 function setMode(next) {
     mode=next;
@@ -73,9 +83,10 @@ function setMode(next) {
     $('session-submit').disabled=!state || (mode==='live' && !!state.active);
     $('mode-hint').innerHTML=icon('info')+(mode==='live'?'Tap Start when you turn on your AC.':'Next, we’ll ask about Eco mode.');
     errorAt('session-error');
+    renderACPreview();
 }
 function resetForm() {
-    editId=null; pending=null; $('session-form').reset(); setTemperature(26);
+    editId=null; pending=null; temperatureDraft=false; $('session-form').reset(); setTemperature(state?.active?.temperature??26,false);
     $('started-at').value=toInput(new Date(now().getTime()-3600000)); $('ended-at').value=toInput(now());
     $('started-at').max=toInput(now()); $('ended-at').max=toInput(now());
     $('log-heading').textContent='Log a cooling session'; $('cancel-edit').hidden=true; $('mode-live').disabled=false; $('mode-manual').disabled=false;
@@ -113,7 +124,7 @@ function render() {
     $('rate-source').href=s.rate_source_url;
     const day=toInput(now()).slice(0,10); $('rate-warning').hidden=day>=s.rate_from&&day<=s.rate_until;
     $('rate-warning').textContent=day>s.rate_until?'Rate period has expired. Update it from your latest bill.':'This rate period has not started yet. Check the rate in Settings.';
-    $('recent-sessions').innerHTML=sessionTable(state.sessions.slice(0,4)); renderHistory(); renderChart(); renderActive();
+    $('recent-sessions').innerHTML=sessionTable(state.sessions.slice(0,4)); renderHistory(); renderChart(); renderActive(); renderACPreview();
     $('session-submit').disabled=mode==='live'&&!!state.active;
 }
 function emptyState() { return `<div class="empty-state"><div class="empty-icon">${icon('clock')}</div><h3>Your cooling journal starts here</h3><p>Log your first session to see your energy and cost take shape.</p><button class="text-button" data-action="focus-log">Log a session ${icon('arrow')}</button></div>`; }
@@ -224,7 +235,7 @@ $('session-form').onsubmit=event=>{
     event.preventDefault(); if(!state) return;
     const data=Object.fromEntries(new FormData(event.currentTarget));
     data.temperature=Number(data.temperature);
-    if(mode==='live') busy($('session-submit'),async()=>{await api('sessions/start','POST',data);await refreshAfterWrite();toast('Session started. Enjoy the cool.');$('active-session').scrollIntoView({behavior:'smooth',block:'center'});},'session-error');
+    if(mode==='live') busy($('session-submit'),async()=>{await api('sessions/start','POST',data);temperatureDraft=false;await refreshAfterWrite();toast('Session started. Enjoy the cool.');$('active-session').scrollIntoView({behavior:'smooth',block:'center'});},'session-error');
     else {pending=data;if(editId)pending.eco_at=state.sessions.find(s=>s.id===editId).eco_at;openEco('manual');}
 };
 $('eco-form').onsubmit=event=>{

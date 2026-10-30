@@ -12,7 +12,7 @@ Dashboard: https://vercel.com/joreenns-projects/coolmeter
 
 Production address: https://coolmeter.vercel.app
 
-Verified production deployment: `dpl_d7ronDyghWAtNRD2goQjtYEsWyu1` (October 30, 2026). Login returned HTTP 200, unauthenticated journal API access returned HTTP 401, and the deployed CSS/JavaScript/theme assets matched local source. The household migration completed on PostgreSQL. The local suite passed 36 tests (214 assertions), including shared timer handover, history preservation, and revoked access. Phone layouts were checked at 320px and 390px widths.
+Verified production deployment: `dpl_3gHRyUM1wsxeNkJeKQxa96sBFbb3` (October 30, 2026). The local suite passed 36 tests (214 assertions), including shared timer handover, history preservation, and revoked access. Signed-in screens with saved sessions were checked at 320px, 390px, and 412px phone widths and 1440px desktop width. Overview, history, details, and household settings stay within the page width. The illustration follows 25°C/27°C selections and restores the running session's target after reload. This update changes public assets and views; it does not alter stored journal data.
 
 The existing Neon database is in `iad1` (Northern Virginia). The function region is now also `iad1`, avoiding repeated database trips between Singapore and the US. Repeat login checks improved from about 3.6–4.5 seconds to 0.55–0.72 seconds in the same test environment; this measures login responses, not a guarantee for every device or a cold database. Keep the Vercel project's Functions region, deployment API `projectSettings.serverlessFunctionRegion`, and `vercel.json` region aligned. Changing the app region does not move or replace the database.
 

@@ -5,7 +5,7 @@
     try { preference = localStorage.getItem('coolmeter-theme'); } catch (_) {}
     const apply = (theme) => {
         root.dataset.theme = theme;
-        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#101b18' : '#f3f6f5');
+        document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0b1220' : '#f3f6f5');
         document.querySelectorAll('[data-theme-toggle]').forEach(button => {
             const dark = theme === 'dark';
             button.setAttribute('aria-label', `Switch to ${dark ? 'light' : 'dark'} theme`);

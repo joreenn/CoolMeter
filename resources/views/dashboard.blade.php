@@ -6,12 +6,12 @@
     <meta name="theme-color" content="#143e35"><meta name="description" content="Your personal LG air conditioner energy and cost journal.">
     <title>CoolMeter · Your cooling, accounted for</title>
     <link rel="icon" type="image/svg+xml" href="/icon.svg"><link rel="manifest" href="/manifest.webmanifest">
-    <script src="/theme.js?v=4"></script>
-    <link rel="stylesheet" href="/app.css?v=4">
+    <script src="/theme.js?v=7"></script>
+    <link rel="stylesheet" href="/app.css?v=7">
     <script type="application/json" id="initial-state">{!! json_encode($initialState ?? null, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) !!}</script>
-    <script src="/app.js?v=4" defer></script>
+    <script src="/app.js?v=7" defer></script>
 </head>
-<body>
+<body class="dashboard-page">
 <svg class="svg-library" xmlns="http://www.w3.org/2000/svg"><defs>
     <symbol id="snow" viewBox="0 0 24 24"><path d="M12 2v20M3.34 7l17.32 10M3.34 17L20.66 7M8 4l4 3 4-3M8 20l4-3 4 3M3 11l4-2-1-5M21 13l-4 2 1 5M3 13l4 2-1 5M21 11l-4-2 1-5"/></symbol>
     <symbol id="home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10H3ZM9 20v-7h6v7"/></symbol>
@@ -44,7 +44,13 @@
     <div class="sidebar-foot"><span class="avatar">{{ auth()->check() ? strtoupper(mb_substr(auth()->user()->name, 0, 1)) : 'J' }}</span><div>{{ auth()->user()?->name ?? 'Home workspace' }}<small>One AC, a shared journal</small></div>@auth<form method="POST" action="{{ route('logout') }}">@csrf<button type="submit" class="text-button">Sign out</button></form>@endauth</div>
 </aside>
 <main>
-    <header class="topbar"><span class="eyebrow">YOUR HOME ENERGY JOURNAL</span><div><span class="timezone">PHT · </span><time id="today-date"></time><button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch color theme">Change theme</button>@auth<form class="mobile-signout" method="POST" action="{{ route('logout') }}">@csrf<button class="text-button" type="submit">Sign out</button></form>@endauth</div></header>
+    <header class="topbar">
+        <span class="eyebrow">YOUR HOME ENERGY JOURNAL</span>
+        <div class="topbar-controls">
+            <div class="topbar-date"><span class="timezone">PHT · </span><time id="today-date"></time></div>
+            <div class="topbar-actions"><button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch color theme">Change theme</button>@auth<form class="mobile-signout" method="POST" action="{{ route('logout') }}">@csrf<button class="text-button" type="submit">Sign out</button></form>@endauth</div>
+        </div>
+    </header>
     <div class="page" id="page-overview">
         <section class="page-heading"><div><div class="greeting">A little cooler. A little wiser.</div><h1>Your cooling, accounted for<span>.</span></h1><p>Get a clearer picture of what your comfort costs.</p></div><button class="btn btn-white" data-action="focus-log"><svg class="icon"><use href="#plus"/></svg>Log a session</button></section>
         <section class="stats" aria-label="Completed session totals this month">
@@ -68,7 +74,8 @@
             </section>
             <aside class="right-column">
                 <section class="card device-card"><div class="section-heading"><h2>Your air conditioner</h2><span class="tag">1 HP INVERTER</span></div>
-                    <div class="ac-scene" aria-hidden="true"><div class="scene-circle"></div><div class="ac-unit"><div class="ac-grille"></div><div class="ac-panel"><span class="lg-mark">LG</span><span class="ac-display">26<span>°</span></span><span class="ac-led"></span></div><div class="ac-louver"></div></div><div class="air-flow"><i></i><i></i><i></i></div></div>
+                    <div class="ac-scene" id="ac-preview-scene" aria-hidden="true"><div class="scene-circle"></div><div class="ac-unit"><div class="ac-grille"></div><div class="ac-panel"><span class="lg-mark">LG</span><span class="ac-display"><span id="ac-preview-temperature">26</span><span class="ac-degree">°</span></span><span class="ac-led"></span></div><div class="ac-louver"></div></div><div class="air-flow"><i></i><i></i><i></i></div></div>
+                    <p class="ac-preview-caption" id="ac-preview-caption" role="status" aria-live="polite" aria-atomic="true">Selected target 26°C</p>
                     <div class="device-name"><div><h3>LG LA100ENT</h3><p>Window-type inverter</p></div><svg class="icon"><use href="#snow"/></svg></div><div class="device-specs"><div><span>Normal input</span><strong>1,030 <small>W</small></strong></div><div><span>Maximum input</span><strong>1,250 <small>W</small></strong></div></div><p class="label-verified"><svg class="icon"><use href="#check"/></svg>Specifications from your unit’s label</p>
                 </section>
                 <section class="rate-card"><div class="rate-top"><span class="rate-logo"><svg class="icon"><use href="#bolt"/></svg></span><div><h3>Davao Light</h3><p>Residential electricity rate</p></div><button class="icon-button" data-page="settings" aria-label="Edit electricity rate"><svg class="icon"><use href="#edit"/></svg></button></div><div class="rate-number" id="rate-number">₱13.33 <span>/ kWh</span></div><div class="rate-period" id="rate-period">Oct 11 – Nov 10, 2026</div><a class="rate-source" id="rate-source" href="#" target="_blank" rel="noopener">Reported rate · view source ↗</a><p id="rate-warning" class="rate-warning" hidden>Rate period has expired. Update it from your latest bill.</p></section>
