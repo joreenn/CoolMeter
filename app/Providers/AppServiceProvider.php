@@ -27,6 +27,8 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('journal-login', fn (Request $request) => Limit::perMinute(5)
             ->by(hash('sha256', strtolower((string) $request->input('email')).'|'.$request->ip())));
         RateLimiter::for('journal-setup', fn (Request $request) => Limit::perMinute(5)->by($request->ip()));
+        RateLimiter::for('journal-join', fn (Request $request) => Limit::perMinute(5)->by($request->ip()));
+        RateLimiter::for('household-manage', fn (Request $request) => Limit::perMinute(20)->by((string) ($request->user()?->id ?? $request->ip())));
         if ($this->app->environment('production')) {
             URL::forceScheme('https');
         }

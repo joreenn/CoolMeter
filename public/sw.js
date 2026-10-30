@@ -1,7 +1,17 @@
-const CACHE='coolmeter-static-v2';
+const CACHE='coolmeter-static-v4';
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(['/offline.html','/icon.svg'])));self.skipWaiting();});
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('coolmeter-static-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
+    const url=new URL(event.request.url);
+    if(event.request.method==='GET'&&url.origin===self.location.origin&&/^\/(app\.css|app\.js|theme\.js|icon\.svg|icon-192\.png|icon-512\.png)$/.test(url.pathname)) {
+        event.respondWith(caches.open(CACHE).then(async cache=>{
+            const saved=await cache.match(event.request);if(saved)return saved;
+            const response=await fetch(event.request);
+            const type=response.headers.get('content-type')||'';
+            if(response.ok&&!response.redirected&&!type.includes('text/html'))await cache.put(event.request,response.clone());
+            return response;
+        }));return;
+    }
     // Never cache private records, API responses, or a document containing a CSRF token.
     if(event.request.mode==='navigate') event.respondWith(fetch(event.request).catch(()=>caches.match('/offline.html')));
 });

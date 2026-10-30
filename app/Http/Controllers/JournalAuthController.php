@@ -23,6 +23,9 @@ class JournalAuthController extends Controller
     public function login(Request $request)
     {
         $credentials = $request->validate(['email' => ['required', 'email'], 'password' => ['required', 'string']]);
+        // Match existing owners too, including an email saved with capital letters.
+        $account = User::whereRaw('LOWER(email) = ?', [strtolower(trim($credentials['email']))])->first();
+        $credentials['email'] = $account?->email ?? strtolower(trim($credentials['email']));
         if (! Auth::attempt($credentials, $request->boolean('remember'))) {
             throw ValidationException::withMessages(['email' => 'The email or password is incorrect.']);
         }
@@ -63,7 +66,7 @@ class JournalAuthController extends Controller
         ]);
         try {
             // Fixed primary key makes simultaneous first-owner submissions exclusive.
-            $owner = User::forceCreate(['id' => 1, 'name' => 'My journal', 'email' => $data['email'], 'password' => $data['password']]);
+            $owner = User::forceCreate(['id' => 1, 'name' => 'My journal', 'email' => strtolower(trim($data['email'])), 'password' => $data['password']]);
         } catch (QueryException $exception) {
             if (in_array((string) $exception->getCode(), ['23000', '23505'], true)) {
                 abort(404);

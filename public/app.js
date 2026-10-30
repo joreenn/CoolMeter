@@ -11,17 +11,31 @@ const toInput = (d = new Date()) => new Date(new Date(d).getTime()+8*3600000).to
 const fromInput = (v) => new Date(v+':00+08:00');
 const duration = (hours) => {const minutes=Math.round(hours*60);return `${Math.floor(minutes/60)}h ${minutes%60}m`;};
 let state, mode='live', editId=null, pending=null, selectedRecord=null, ecoContext='manual', clockOffset=0, deleteTarget=null;
-let toastTimeout, initialLoad=true;
+let toastTimeout, initialLoad=true, loadPromise=null, lastLoadedAt=0, household=null;
 const csrf = document.querySelector('meta[name="csrf-token"]').content;
 
 async function api(path, method='GET', body) {
-    const response = await fetch('/api/'+path, {method, headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':csrf}, body:body===undefined?undefined:JSON.stringify(body)});
+    let response;
+    for(let attempt=0;attempt<(method==='GET'?2:1);attempt++) {
+        const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),20000);
+        try {
+            response=await fetch('/api/'+path, {method, credentials:'same-origin', cache:'no-store', signal:controller.signal, headers:{'Accept':'application/json','Content-Type':'application/json','X-CSRF-TOKEN':csrf}, body:body===undefined?undefined:JSON.stringify(body)});
+            if(method==='GET'&&attempt===0&&[502,503,504].includes(response.status)) {await new Promise(resolve=>setTimeout(resolve,500));continue;}
+            break;
+        } catch(error) {
+            if(method==='GET'&&attempt===0) {await new Promise(resolve=>setTimeout(resolve,500));continue;}
+            throw new Error(method==='GET'?'Connection interrupted. Check your internet connection and tap Retry.':'Connection interrupted. Refresh to check whether your change was saved before trying again.');
+        } finally {clearTimeout(timeout);}
+    }
     if (response.status===204) return null;
+    if(response.status===401){window.location.assign('/login');throw new Error('Please sign in to your journal.');}
+    if(response.redirected||!response.headers.get('content-type')?.includes('application/json')) throw new Error('Your sign-in may have expired. Reload the app to sign in again.');
     let data; try { data=await response.json(); } catch { throw new Error('The server returned an unexpected response. Reload the app and try again.'); }
     if (!response.ok) {
         if(response.status===401){window.location.assign('/login');throw new Error('Please sign in to your journal.');}
         if(response.status===419) throw new Error('Your page session expired. Reload the app before saving.');
-        throw new Error(data.errors ? Object.values(data.errors).flat().join(' ') : data.message || 'Something went wrong. Please try again.');
+        const error=new Error(data.errors ? Object.values(data.errors).flat().join(' ') : data.message || 'Something went wrong. Please try again.');
+        error.status=response.status;throw error;
     }
     return data;
 }
@@ -29,8 +43,11 @@ function errorAt(id, message='') { $(id).textContent=message; $(id).hidden=!mess
 function toast(message) { $('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>$('toast').hidden=true,4500); }
 async function busy(button, action, errorId) {
     button.disabled=true; if(errorId) errorAt(errorId);
-    try { await action(); } catch(error) { if(errorId) errorAt(errorId,error.message);else toast(error.message); }
-    finally { button.disabled=false; }
+    try { await action(); } catch(error) {
+        if(errorId) errorAt(errorId,error.message);else toast(error.message);
+        if(error.status===409) {await load().catch(()=>{});if(!state?.active){$('stop-dialog').close();$('eco-dialog').close();toast(error.message);}}
+    }
+    finally { button.disabled=button.id==='session-submit'&&(!state||(mode==='live'&&!!state.active)); }
 }
 function showDialog(id) { if(!$(id).open) $(id).showModal(); }
 function now() { return new Date(Date.now()+clockOffset); }
@@ -39,6 +56,7 @@ function changePage(page) {
     document.querySelectorAll('main>.page').forEach(p=>p.hidden=p.id!=='page-'+page);
     document.querySelectorAll('nav .nav-item').forEach(b=>{b.classList.toggle('active',b.dataset.page===page);b.setAttribute('aria-current',b.dataset.page===page?'page':'false');});
     history.replaceState(null,'','#'+page); window.scrollTo({top:0,behavior:'instant'});
+    if(page==='settings') loadHousehold().catch(error=>{if($('household-members'))$('household-members').textContent=error.message;});
 }
 function setTemperature(value) {
     value=Math.min(30,Math.max(16,Number(value)));
@@ -63,13 +81,24 @@ function resetForm() {
     $('log-heading').textContent='Log a cooling session'; $('cancel-edit').hidden=true; $('mode-live').disabled=false; $('mode-manual').disabled=false;
     setMode('live');
 }
+function applyState(data, fillSettings=false) {
+    state=data; clockOffset=new Date(data.server_now).getTime()-Date.now(); lastLoadedAt=Date.now();
+    render(); if(fillSettings||initialLoad) populateSettings();
+    if(initialLoad) { resetForm(); initialLoad=false; }
+    $('load-error').hidden=true;
+}
 async function load(fillSettings=false) {
-    try {
-        const data=await api('state'); state=data; clockOffset=new Date(data.server_now).getTime()-Date.now();
-        render(); if(fillSettings||initialLoad) populateSettings();
-        if(initialLoad) { resetForm(); initialLoad=false; }
-        $('load-error').hidden=true;
-    } catch(error) { $('load-error-text').textContent='Cannot reach your journal. '+error.message;$('load-error').hidden=false;throw error; }
+    if(loadPromise) {await loadPromise; if(fillSettings)populateSettings();return;}
+    loadPromise=(async()=>{
+        try {applyState(await api('state'),fillSettings);}
+        catch(error) {$('load-error-text').textContent=(state?'Showing the last loaded sessions. ':'')+error.message;$('load-error').hidden=false;throw error;}
+    })();
+    try {await loadPromise;} finally {loadPromise=null;}
+}
+async function refreshAfterWrite(fillSettings=false) {
+    // A refresh already running may have read the journal before this write.
+    if(loadPromise)await loadPromise.catch(()=>{});
+    await load(fillSettings);
 }
 function render() {
     $('today-date').textContent=fmt(now(),{weekday:'short',day:'numeric',month:'short',year:'numeric'});
@@ -121,7 +150,7 @@ function updateTimer() {
 function renderActive() {
     const s=state.active; $('active-session').hidden=!s;
     if(!s) {$('active-session').innerHTML='';return;}
-    $('active-session').innerHTML=`<span class="live-indicator"></span><div><div class="live-title">Cooling in progress · ${s.temperature}°C${s.eco_at?' · Eco on':''}</div><div class="live-copy" id="live-estimate"></div><button class="text-button" data-action="discard-live" style="font-size:9px;margin-top:6px">Discard timer</button></div><div class="live-time" id="live-clock">00:00:00</div><div class="live-actions"><button class="btn btn-white" data-action="live-eco">${icon('leaf')}${s.eco_at?'Edit Eco time':'Eco enabled'}</button><button class="btn btn-primary" data-action="stop">${icon('stop')}Stop session</button></div>`;
+    $('active-session').innerHTML=`<span class="live-indicator"></span><div><div class="live-title">Cooling in progress · ${s.temperature}°C${s.eco_at?' · Eco on':''}</div><div class="live-copy" id="live-estimate"></div><button class="text-button" data-action="discard-live">Discard timer</button></div><div class="live-time" id="live-clock">00:00:00</div><div class="live-actions"><button class="btn btn-white" data-action="live-eco">${icon('leaf')}${s.eco_at?'Edit Eco time':'Eco enabled'}</button><button class="btn btn-primary" data-action="stop">${icon('stop')}Stop session</button></div>`;
     updateTimer();
 }
 function resultMarkup(e, data, settings) {
@@ -153,8 +182,31 @@ function populateSettings() {
     if(!state) return;
     for(const element of $('settings-form').elements) if(element.name&&state.settings[element.name]!==undefined) element.value=state.settings[element.name];
 }
+async function loadHousehold() {
+    if(!$('household-members'))return;
+    household=await api('household');
+    if($('invite-form'))$('invite-form').hidden=!household.enabled||!household.owner;
+    if(!household.enabled) {
+        $('household-members').textContent='Invitations are available in your online journal. Sign in there to share this AC.';
+        if($('household-invites'))$('household-invites').innerHTML='';return;
+    }
+    $('household-members').innerHTML=household.members.map(member=>`<div class="household-row"><div><strong>${esc(member.name)}</strong><small>${esc(member.email)} · ${member.is_owner?'Owner':'Member'}${member.id===household.current_user.id?' · You':''}</small></div>${household.owner&&!member.is_owner?`<button class="btn btn-white" data-remove-member="${member.id}">Remove access</button>`:''}</div>`).join('');
+    if($('household-invites'))$('household-invites').innerHTML=household.owner&&household.invites.length?household.invites.map(invite=>`<div class="household-row"><div><strong>${esc(invite.email)}</strong><small>Expires ${dateLabel(invite.expires_at)} · ${timeLabel(invite.expires_at)}</small></div><button class="btn btn-white" data-revoke-invite="${invite.id}">Revoke</button></div>`).join(''):'<p class="field-help">No pending invitations.</p>';
+}
 
 document.addEventListener('click', event=>{
+    const removeMember=event.target.closest('[data-remove-member]');
+    if(removeMember) {
+        if(window.confirm('Remove this person’s access to your shared AC journal? Your cooling sessions will stay saved.'))busy(removeMember,async()=>{await api('household/members/'+removeMember.dataset.removeMember,'DELETE');await loadHousehold();toast('Member access removed.');});
+        return;
+    }
+    const revokeInvite=event.target.closest('[data-revoke-invite]');
+    if(revokeInvite) {busy(revokeInvite,async()=>{await api('household/invites/'+revokeInvite.dataset.revokeInvite,'DELETE');await loadHousehold();$('invite-result').hidden=true;toast('Invitation revoked.');});return;}
+    if(event.target.closest('[data-copy-invite]')) {
+        const input=$('invite-link');input.select();
+        if(navigator.clipboard)navigator.clipboard.writeText(input.value).then(()=>toast('Invitation link copied.')).catch(()=>toast('Select and copy the invitation link.'));
+        else toast('Select and copy the invitation link.');return;
+    }
     const close=event.target.closest('[data-close]');if(close){$(close.dataset.close).close();return;}
     const page=event.target.closest('[data-page]');if(page){changePage(page.dataset.page);return;}
     const detail=event.target.closest('[data-detail]');if(detail&&state){openDetail(state.sessions.find(s=>s.id===Number(detail.dataset.detail)));return;}
@@ -172,19 +224,19 @@ $('session-form').onsubmit=event=>{
     event.preventDefault(); if(!state) return;
     const data=Object.fromEntries(new FormData(event.currentTarget));
     data.temperature=Number(data.temperature);
-    if(mode==='live') busy($('session-submit'),async()=>{await api('sessions/start','POST',data);await load();toast('Session started. Enjoy the cool.');$('active-session').scrollIntoView({behavior:'smooth',block:'center'});},'session-error');
+    if(mode==='live') busy($('session-submit'),async()=>{await api('sessions/start','POST',data);await refreshAfterWrite();toast('Session started. Enjoy the cool.');$('active-session').scrollIntoView({behavior:'smooth',block:'center'});},'session-error');
     else {pending=data;if(editId)pending.eco_at=state.sessions.find(s=>s.id===editId).eco_at;openEco('manual');}
 };
 $('eco-form').onsubmit=event=>{
     event.preventDefault();busy(event.submitter,async()=>{
-        if(ecoContext==='live'){await api(`sessions/${state.active.id}/eco`,'PUT',{eco_at:$('eco-time').value});$('eco-dialog').close();await load();toast('Eco time recorded.');}
+        if(ecoContext==='live'){await api(`sessions/${state.active.id}/eco`,'PUT',{eco_at:$('eco-time').value});$('eco-dialog').close();await refreshAfterWrite();toast('Eco time recorded.');}
         else await preview($('eco-time').value);
     },'eco-error');
 };
 $('no-eco').onclick=()=>busy($('no-eco'),()=>preview(null),'eco-error');
 $('save-session').onclick=()=>busy($('save-session'),async()=>{
     const record=await api(editId?`sessions/${editId}`:'sessions',editId?'PUT':'POST',pending);
-    $('result-dialog').close();resetForm();await load();toast('Session saved to your journal.');openDetail(record);
+    $('result-dialog').close();resetForm();await refreshAfterWrite();toast('Session saved to your journal.');openDetail(record);
 },'result-error');
 $('edit-session').onclick=()=>{
     const s=selectedRecord;editId=s.id;changePage('overview');$('detail-dialog').close();setMode('manual');
@@ -202,26 +254,36 @@ function confirmDelete(id,live=false) {
 $('delete-session').onclick=()=>confirmDelete(selectedRecord.id);
 $('confirm-delete').onclick=()=>busy($('confirm-delete'),async()=>{
     await api('sessions/'+deleteTarget,'DELETE');$('confirm-dialog').close();$('detail-dialog').close();
-    if(editId===deleteTarget) resetForm();await load();toast('Session removed.');
+    if(editId===deleteTarget) resetForm();await refreshAfterWrite();toast('Session removed.');
 },'confirm-error');
 $('stop-choice').onchange=()=>{$('stop-time-label').hidden=$('stop-choice').value==='now';$('stop-time').required=$('stop-choice').value==='earlier';};
 $('stop-form').onsubmit=event=>{
     event.preventDefault();busy(event.submitter,async()=>{
         const record=await api(`sessions/${state.active.id}/stop`,'POST',{ended_at:$('stop-choice').value==='earlier'?$('stop-time').value:null});
-        $('stop-dialog').close();await load();toast('Cooling session finished and saved.');openDetail(record);
+        $('stop-dialog').close();await refreshAfterWrite();toast('Cooling session finished and saved.');openDetail(record);
     },'stop-error');
 };
 $('settings-form').onsubmit=event=>{
     event.preventDefault();busy(event.submitter,async()=>{
         const data=Object.fromEntries(new FormData(event.currentTarget));
-        await api('settings','PUT',data);await load(true);$('settings-message').textContent='Saved. New sessions will use these settings.';toast('Settings saved.');
+        await api('settings','PUT',data);await refreshAfterWrite(true);$('settings-message').textContent='Saved. New sessions will use these settings.';toast('Settings saved.');
     }).catch(()=>{});
 };
 $('history-month').onchange=()=>state&&renderHistory();$('clear-filter').onclick=()=>{$('history-month').value='';if(state)renderHistory();};
 $('retry-load').onclick=()=>load().catch(()=>{});
-changePage(location.hash.slice(1)||'overview');$('session-submit').disabled=true;$('mode-live').disabled=true;$('mode-manual').disabled=true;
-load().catch(()=>{});
+if($('invite-form'))$('invite-form').onsubmit=event=>{
+    event.preventDefault();busy(event.submitter,async()=>{
+        const data=await api('household/invites','POST',{email:$('invite-email').value});
+        $('invite-result').innerHTML=`<label>Share this one-time invitation link<input id="invite-link" type="text" readonly value="${esc(data.invite_url)}"></label><button type="button" class="btn btn-white" data-copy-invite>Copy link</button><p>Send this link directly to ${esc(data.invite.email)}. It expires in 48 hours. They will create their own sign-in and join this AC’s existing sessions.</p>`;
+        $('invite-result').hidden=false;await loadHousehold();toast('Invitation ready to share.');
+    },'invite-error');
+};
+$('session-submit').disabled=true;$('mode-live').disabled=true;$('mode-manual').disabled=true;
+let initialState;try{initialState=JSON.parse($('initial-state')?.textContent||'null');}catch{}
+if(initialState)applyState(initialState);else load().catch(()=>{});
+changePage(location.hash.slice(1)||'overview');
 setInterval(updateTimer,1000);
-setInterval(()=>{if(!document.hidden&&!document.querySelector('dialog[open]'))load().catch(()=>{});},30000);
-window.addEventListener('focus',()=>{if(state&&!document.querySelector('dialog[open]'))load().catch(()=>{});});
+setInterval(()=>{if(!document.hidden&&!document.querySelector('dialog[open]')&&Date.now()-lastLoadedAt>(state?.active?14000:29000))load().catch(()=>{});},15000);
+window.addEventListener('focus',()=>{if(state&&Date.now()-lastLoadedAt>5000&&!document.querySelector('dialog[open]'))load().catch(()=>{});});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&Date.now()-lastLoadedAt>5000&&!document.querySelector('dialog[open]'))load().catch(()=>{});});
 if('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/sw.js').catch(()=>{});

@@ -12,9 +12,9 @@ Dashboard: https://vercel.com/joreenns-projects/coolmeter
 
 Production address: https://coolmeter.vercel.app
 
-Verified production deployment: `dpl_DzRfxgPJUhYxhSxvynQ8E5asB5fx` (October 29, 2026). Login returned HTTP 200, unauthenticated journal API access returned HTTP 401, and the PWA manifest returned HTTP 200. The full local suite passed 25 tests (108 assertions), followed by the authentication tests after the final routing update (54 assertions).
+Verified production deployment: `dpl_DT3EuKGkVfvap7DVZLETEzpA4o8E` (October 30, 2026). Login returned HTTP 200, unauthenticated journal API access returned HTTP 401, and the deployed CSS/JavaScript/theme assets matched local source. The household migration completed on PostgreSQL. The local suite passed 36 tests (214 assertions), including shared timer handover, history preservation, and revoked access. Phone layouts were checked at 320px and 390px widths.
 
-The existing Vercel sign-in protection remains in effect in addition to the app's owner sign-in. This requires the deployment owner's Vercel account to access protected URLs. No paid upgrade or custom domain was purchased.
+With the owner's explicit approval, Vercel Authentication now protects preview deployments only. Production requires CoolMeter's own sign-in and invitation-only membership, so family members do not need the owner's Vercel account. No paid upgrade or custom domain was purchased.
 
 Creating the project does not mean a working app has been deployed. Check the deployment's final status and test its URL after the database is connected.
 
@@ -44,6 +44,14 @@ The PHP entry point puts disposable framework caches and compiled views in `/tmp
 The deployment operator generates a random setup token in memory and configures its hash as above. Open `https://YOUR-APP/setup/TOKEN` privately and choose your email/password yourself (at least 12 characters). It creates the single owner and signs you in. The setup invite becomes unusable as soon as an owner exists. There is no public registration endpoint.
 
 Subsequent visits use `/login`. Passwords are hashed by Laravel; login attempts are throttled using the persistent database cache. Session cookies are encrypted/signed by Laravel and marked secure online. The journal's read, export, calculation, and mutation endpoints all require sign-in online. Keep your password in a password manager; email-based password recovery is not configured in this version.
+
+## Shared household access
+
+After owner setup, use **Settings → One AC, together** to create an email-bound invitation link. The invited person creates a separate account using that link; every account shares this deployment's single AC and history. The owner alone can invite people or remove access. No email delivery service is needed: the owner copies and shares the generated link.
+
+Deploy upgrades with `php artisan migrate --force` only. The household upgrade adds its invitation table and preserves existing cooling sessions, settings, and owner credentials. Never use `migrate:fresh`, `db:wipe`, or replace the hosted database during an upgrade.
+
+Vercel Authentication is a separate gate from CoolMeter sign-in. If enabled for production, family members also need deployment access. Changing that protection requires the operator's approval; keep CoolMeter's own sign-in enabled.
 
 ## Verification
 

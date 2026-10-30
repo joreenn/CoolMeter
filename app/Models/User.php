@@ -13,6 +13,11 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
+    public function isJournalOwner(): bool
+    {
+        return (int) $this->getKey() === 1;
+    }
+
     /**
      * The attributes that are mass assignable.
      *

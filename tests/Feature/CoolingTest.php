@@ -96,4 +96,30 @@ class CoolingTest extends TestCase {
     public function test_settings_validation_keeps_bad_power_and_rates_out(): void {
         $this->putJson('/api/settings',array_replace(config('cooling'),['normal_watts'=>1300,'rate'=>-1]))->assertUnprocessable();
     }
+    public function test_dashboard_bootstraps_saved_history_without_executable_note_markup(): void {
+        $note = '</script><script>alert("note")</script>';
+        $this->postJson('/api/sessions', $this->entry(['notes' => $note]))->assertCreated();
+        $response = $this->get('/')->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+        preg_match('/<script type="application\/json" id="initial-state">(.*?)<\/script>/s', $response->getContent(), $match);
+        $initial = json_decode($match[1], true, flags: JSON_THROW_ON_ERROR);
+        $this->assertCount(1, $initial['sessions']);
+        $this->assertSame($note, $initial['sessions'][0]['notes']);
+        $this->assertStringNotContainsString($note, $response->getContent());
+    }
+    public function test_stale_in_flight_stop_cannot_overwrite_an_already_stopped_session(): void {
+        $id = $this->postJson('/api/sessions/start', $this->entry())->json('id');
+        $stale = CoolingSession::findOrFail($id);
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-10-29 21:00:00', 'Asia/Manila'));
+        \Illuminate\Support\Carbon::setTestNow(CarbonImmutable::now());
+        $this->postJson('/api/sessions/'.$id.'/stop', [])->assertOk();
+        $saved = CoolingSession::findOrFail($id)->getRawOriginal();
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-10-29 22:00:00', 'Asia/Manila'));
+        try {
+            app(\App\Http\Controllers\CoolingController::class)->stop(\Illuminate\Http\Request::create('/','POST'), $stale);
+            $this->fail('A stale stop must be rejected.');
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpException $error) {
+            $this->assertSame(409, $error->getStatusCode());
+        }
+        $this->assertSame($saved, CoolingSession::findOrFail($id)->getRawOriginal());
+    }
 }

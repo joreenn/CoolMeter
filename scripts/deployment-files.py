@@ -10,7 +10,7 @@ for folder in ('app', 'config', 'routes', 'resources/views', 'database/migration
     files += list((root / folder).rglob('*.php'))
 for filename in ('artisan', 'composer.json', 'composer.lock', 'bootstrap/app.php', 'bootstrap/providers.php', 'bootstrap/cache/.gitignore', 'storage/framework/cache/data/.gitignore', 'storage/framework/views/.gitignore', 'storage/framework/sessions/.gitignore', 'storage/logs/.gitignore', 'api/index.php', 'vercel.json', 'scripts/vercel-build.php'):
     files.append(root / filename)
-for filename in ('app.css', 'app.js', 'icon.svg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'sw.js', 'offline.html'):
+for filename in ('app.css', 'app.js', 'theme.js', 'icon.svg', 'icon-192.png', 'icon-512.png', 'manifest.webmanifest', 'sw.js', 'offline.html'):
     files.append(root / 'public' / filename)
 result = []
 for file in sorted(set(files)):

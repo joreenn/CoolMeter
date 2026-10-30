@@ -13,7 +13,13 @@ class CoolingController extends Controller {
     private function inputFor(CoolingSession $s): array {
         return ['started_at' => $s->started_at, 'ended_at' => $s->ended_at, 'eco_at' => $s->eco_at, 'room_heat' => $s->room_heat];
     }
+    public function dashboard() {
+        return response()->view('dashboard', ['initialState' => $this->journalState()])->header('Cache-Control', 'private, no-store');
+    }
     public function state() {
+        return response()->json($this->journalState())->header('Cache-Control', 'private, no-store');
+    }
+    private function journalState(): array {
         $sessions = CoolingSession::orderByDesc('started_at')->get();
         $completed = $sessions->whereNotNull('ended_at'); $now = CarbonImmutable::now('Asia/Manila');
         $sum = function ($from, $to) use ($completed) {
@@ -31,12 +37,20 @@ class CoolingController extends Controller {
             $week[] = ['date' => $day->toDateString()] + $sum($day, $day->addDay());
         }
         $active = $sessions->firstWhere('active_slot', 1);
-        return response()->json(['settings' => CoolingSetting::current(), 'server_now' => $now->toIso8601String(),
+        return ['settings' => CoolingSetting::current(), 'server_now' => $now->toIso8601String(),
             'sessions' => $completed->values(),
             'active' => $active ? $active->toArray() + ['live_estimate' => $this->estimator->calculate(
                 array_replace($this->inputFor($active), ['ended_at' => $now]), $active->assumptions)] : null,
             'today' => $sum($now->startOfDay(), $now->startOfDay()->addDay()),
-            'month' => $sum($now->startOfMonth(), $now->startOfMonth()->addMonth()), 'week' => $week]);
+            'month' => $sum($now->startOfMonth(), $now->startOfMonth()->addMonth()), 'week' => $week];
+    }
+    private function journalWrite(callable $action) {
+        return DB::transaction(function () use ($action) {
+            // One AC has one timeline. Serialize edits from different household members.
+            CoolingSetting::query()->insertOrIgnore(['id' => 1, 'values' => '{}', 'created_at' => now(), 'updated_at' => now()]);
+            CoolingSetting::whereKey(1)->lockForUpdate()->firstOrFail();
+            return $action();
+        });
     }
     private function details(Request $r): array {
         return $r->validate(['temperature' => ['required', 'integer', 'between:16,30'],
@@ -60,27 +74,35 @@ class CoolingController extends Controller {
         return response()->json($this->estimator->calculate($data, $settings));
     }
     public function store(Request $r) {
-        $data = $this->details($r) + $this->times($r); $settings = CoolingSetting::current();
+        $data = $this->details($r) + $this->times($r);
+        return $this->journalWrite(function () use ($data) {
+        $settings = CoolingSetting::current();
         $this->rejectOverlap($data['started_at'], $data['ended_at']);
         return response()->json(CoolingSession::create($data + ['assumptions' => $settings,
             'estimate' => $this->estimator->calculate($data, $settings)]), 201);
+        });
     }
     public function update(Request $r, CoolingSession $session) {
+        return $this->journalWrite(function () use ($r, $session) {
+        $session = CoolingSession::whereKey($session->id)->lockForUpdate()->firstOrFail();
         abort_if($session->active_slot, 409, 'Stop the running session before editing it.');
         $data = $this->details($r) + $this->times($r);
         $this->rejectOverlap($data['started_at'], $data['ended_at'], $session->id);
         $session->update($data + ['estimate' => $this->estimator->calculate($data, $session->assumptions)]);
         return response()->json($session);
+        });
     }
     public function start(Request $r) {
         $details = $this->details($r);
-        return DB::transaction(function () use ($details) {
+        return $this->journalWrite(function () use ($details) {
             abort_if(CoolingSession::where('active_slot', 1)->exists(), 409, 'A session is already running. Refresh to see it.');
             return response()->json(CoolingSession::create($details + ['started_at' => CarbonImmutable::now('Asia/Manila'),
                 'active_slot' => 1, 'assumptions' => CoolingSetting::current()]), 201);
         });
     }
     public function eco(Request $r, CoolingSession $session) {
+        return $this->journalWrite(function () use ($r, $session) {
+        $session = CoolingSession::whereKey($session->id)->lockForUpdate()->firstOrFail();
         abort_unless($session->active_slot, 409, 'This session has already stopped.');
         $data = $r->validate(['eco_at' => ['required', 'date_format:Y-m-d\TH:i', 'before_or_equal:now']]);
         $eco = CarbonImmutable::parse($data['eco_at'], 'Asia/Manila');
@@ -89,8 +111,11 @@ class CoolingController extends Controller {
         }
         $session->update(['eco_at' => $eco->max($session->started_at)]);
         return response()->json($session);
+        });
     }
     public function stop(Request $r, CoolingSession $session) {
+        return $this->journalWrite(function () use ($r, $session) {
+        $session = CoolingSession::whereKey($session->id)->lockForUpdate()->firstOrFail();
         abort_unless($session->active_slot, 409, 'This session has already stopped.');
         $r->validate(['ended_at' => ['nullable', 'date_format:Y-m-d\TH:i', 'before_or_equal:now']]);
         $end = $r->filled('ended_at') ? CarbonImmutable::parse($r->input('ended_at'), 'Asia/Manila') : CarbonImmutable::now('Asia/Manila');
@@ -102,6 +127,7 @@ class CoolingController extends Controller {
         $session->update(['ended_at' => $end, 'active_slot' => null,
             'estimate' => $this->estimator->calculate($input, $session->assumptions)]);
         return response()->json($session);
+        });
     }
     private function rejectOverlap($start, $end, ?int $except = null): void {
         $q = CoolingSession::where('started_at', '<', CarbonImmutable::parse($end, 'Asia/Manila'))
@@ -111,8 +137,14 @@ class CoolingController extends Controller {
             throw ValidationException::withMessages(['started_at' => 'These times overlap another session for your AC.']);
         }
     }
-    public function destroy(CoolingSession $session) { $session->delete(); return response()->noContent(); }
+    public function destroy(CoolingSession $session) {
+        return $this->journalWrite(function () use ($session) {
+            CoolingSession::whereKey($session->id)->firstOrFail()->delete();
+            return response()->noContent();
+        });
+    }
     public function settings(Request $r) {
+        return $this->journalWrite(function () use ($r) {
         $data = $r->validate(['rate' => ['required', 'numeric', 'min:0.01', 'max:100'],
             'rate_from' => ['required', 'date_format:Y-m-d'],
             'rate_until' => ['required', 'date_format:Y-m-d', 'after_or_equal:rate_from'],
@@ -126,6 +158,7 @@ class CoolingController extends Controller {
         }
         CoolingSetting::updateOrCreate(['id' => 1], ['values' => array_replace($old, $data)]);
         return response()->json(CoolingSetting::current());
+        });
     }
     public function export() {
         return response()->streamDownload(function () {
